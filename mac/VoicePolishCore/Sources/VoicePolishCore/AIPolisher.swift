@@ -122,6 +122,8 @@ public class AIPolisher {
             return PolishSelection(provider: "qwen", model: (saved?.isEmpty == false) ? saved! : "qwen3.6-flash")
         case "zhipu":
             return PolishSelection(provider: "zhipu", model: config.string(forKey: "zhipu_polish_model") ?? "glm-4.7-flash")
+        case "custom":
+            return PolishSelection(provider: "custom", model: config.string(forKey: "custom_polish_model"))
         default:
             let saved = config.string(forKey: "doubao_polish_model")
             return PolishSelection(provider: "doubao", model: (saved?.isEmpty == false) ? saved! : defaultDoubaoPolishModel)
@@ -421,6 +423,106 @@ public class AIPolisher {
         (0x4E00...0x9FFF).contains(Int(scalar.value))
     }
 
+    // MARK: - 自定义档（OpenAI 兼容端点）
+
+    /// Base URL 规整：去首尾空白与尾斜杠，只认 http/https（防手滑填出奇怪 scheme）。
+    /// 返回 nil = 无法构成可用地址，视为未配置。
+    static func normalizedCustomBase(_ base: String?) -> String? {
+        guard var trimmed = base?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else { return nil }
+        while trimmed.hasSuffix("/") { trimmed = String(trimmed.dropLast()) }
+        guard let url = URL(string: trimmed),
+              let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return nil }
+        return trimmed
+    }
+
+    /// 按 OpenAI 生态习惯拼 chat/completions 端点：用户填 Base URL（可带 /v1、可带尾斜杠），
+    /// 这里补上 /chat/completions；已带完整路径则原样使用。
+    static func customChatCompletionsURL(from base: String?) -> URL? {
+        guard var trimmed = normalizedCustomBase(base) else { return nil }
+        if trimmed.hasSuffix("/chat/completions") { return URL(string: trimmed) }
+        trimmed += "/chat/completions"
+        return URL(string: trimmed)
+    }
+
+    /// 拼模型列表地址（GET {base}/models）。用户把完整 chat/completions 粘进 Base URL 时剥掉再拼。
+    static func customModelsURL(from base: String) -> URL? {
+        guard var trimmed = normalizedCustomBase(base) else { return nil }
+        if trimmed.hasSuffix("/chat/completions") { trimmed = String(trimmed.dropLast("/chat/completions".count)) }
+        return URL(string: trimmed + "/models")
+    }
+
+    /// 解析 /models 响应（OpenAI 格式 {"data":[{"id":...}]}）：取 id、去空去重排序。
+    static func parseModelsList(from data: Data) -> [String] {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let items = json["data"] as? [[String: Any]] else { return [] }
+        let ids = items.compactMap { ($0["id"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) }
+        return Array(Set(ids.filter { !$0.isEmpty })).sorted()
+    }
+
+    /// 自定义档的润色请求体：只发通用参数，不带任何厂商专属字段
+    /// （enable_thinking/top_p 等对严格校验的端点会直接 4xx）。
+    static func customPolishBody(model: String, systemPrompt: String, userPrompt: String) -> [String: Any] {
+        ["model": model,
+         "messages": [
+            ["role": "system", "content": systemPrompt],
+            ["role": "user", "content": userPrompt]
+         ],
+         "temperature": 0.1,
+         "max_tokens": 2000]
+    }
+
+    /// 自定义档的问答（问 AI）请求体：同上只发通用参数，参数取问答调好的档
+    /// （stream 为渐进显示所需，属 OpenAI 标准字段）。
+    static func customAskBody(model: String, messages: [[String: Any]]) -> [String: Any] {
+        ["model": model,
+         "messages": messages,
+         "stream": true,
+         "temperature": 0.5,
+         "max_tokens": 1200]
+    }
+
+    /// 自定义档配置解析：Base URL / 模型 / API Key 三项齐且 URL 合法才算已配置（等价自带 Key）。
+    /// 单独抽 static + 传 config 是为了可测（polishProvider() 里走 shared）；app 层健康卡也用它判定。
+    /// key 不再单独判 isEmpty：string() 对 secret 键每一层都保证非空才返回。
+    public static func customPolishProvider(config: VoicePolishConfig) -> (name: String, url: URL, model: String, apiKey: String)? {
+        guard let key = config.string(forKey: "custom_api_key", envKey: "CUSTOM_API_KEY"),
+              let base = config.string(forKey: "custom_polish_base_url"),
+              let model = config.string(forKey: "custom_polish_model"),
+              let url = customChatCompletionsURL(from: base) else { return nil }
+        return ("custom", url, model, key)
+    }
+
+    /// 拉取自定义端点的模型列表（GET {base}/models + Bearer）。设置页「拉取列表」按钮用；
+    /// 列表为空视为端点不支持 /models，失败原样回报。
+    public func fetchCustomModels(baseURL: String, apiKey: String, completion: @escaping (Result<[String], Error>) -> Void) {
+        guard let url = Self.customModelsURL(from: baseURL) else {
+            completion(.failure(PolishError.apiError("Base URL 无效，请检查填写的内容")))
+            return
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 15
+        URLSession.shared.dataTask(with: request) { data, _, error in
+            if let error = error {
+                completion(.failure(error))
+                return
+            }
+            guard let data = data else {
+                completion(.failure(PolishError.noData))
+                return
+            }
+            let models = Self.parseModelsList(from: data)
+            guard !models.isEmpty else {
+                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+                let reason = Self.extractAPIErrorMessage(from: json) ?? "端点未返回模型列表（可能不支持 /models），可手填模型名"
+                completion(.failure(PolishError.apiError(reason)))
+                return
+            }
+            completion(.success(models))
+        }.resume()
+    }
+
     private func polishProvider() -> (name: String, url: URL, model: String, apiKey: String)? {
         let config = VoicePolishConfig.shared
         let provider = config.string(forKey: "polish_provider") ?? "qwen"
@@ -440,6 +542,8 @@ public class AIPolisher {
             let model = config.string(forKey: "zhipu_polish_model") ?? "glm-4.7-flash"
             let url = URL(string: "https://open.bigmodel.cn/api/paas/v4/chat/completions")!
             return ("zhipu", url, model, key)
+        case "custom":
+            return Self.customPolishProvider(config: config)
         default:
             guard let key = getAPIKey() else { return nil }
             let saved = config.string(forKey: "doubao_polish_model")
@@ -475,6 +579,10 @@ public class AIPolisher {
         let userPrompt = Self.makeCloudASRPolishUserPrompt(for: text, outputLanguage: outputLanguage)
 
         func makeBody(_ model: String) -> [String: Any] {
+            // 自定义档：整体走通用参数构造，不掺厂商字段
+            if provider.name == "custom" {
+                return Self.customPolishBody(model: model, systemPrompt: systemPrompt, userPrompt: userPrompt)
+            }
             var body: [String: Any] = [
                 "model": model,
                 "messages": [
@@ -736,6 +844,10 @@ public class AIPolisher {
         let forceSearch = Self.isTimeSensitive(question)
         debugLog?("Ask provider=\(provider.name) model=\(provider.model) forceSearch=\(forceSearch) history=\(history.count)")
         func makeBody(_ model: String, search: Bool) -> [String: Any] {
+            // 自定义档：整体走通用参数构造，不掺厂商字段（stream 是 OpenAI 标准字段，问答渐进显示靠它）
+            if provider.name == "custom" {
+                return Self.customAskBody(model: model, messages: messages)
+            }
             var body: [String: Any] = ["model": model, "messages": messages, "stream": true]
             if provider.name == "qwen" {
                 body["top_p"] = 0.8; body["temperature"] = 0.5; body["enable_thinking"] = false
@@ -763,7 +875,9 @@ public class AIPolisher {
                     if !text.isEmpty { TrialManager.shared.recordSelfKeyUsage(chars: text.count) }
                     completion(.success(text))
                 case .failure(let err):
-                    if case PolishError.quotaExhausted = err {
+                    // 自定义档单发直连：错误（含 403 额度类）原样回报，不进降级链，
+                    // 也不 markExhausted——自定义模型名可能与千问队列重名，标记会污染千问的自动路由。
+                    if case PolishError.quotaExhausted = err, provider.name != "custom" {
                         PolishModelRouter.markExhausted(model)
                         self?.debugLog?("Ask: \(model) 额度类失败，降级到下一个")
                         attempt(index + 1, search: search)

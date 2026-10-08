@@ -72,6 +72,18 @@ final class SecretStoreRoutingTests: XCTestCase {
         XCTAssertTrue(raw.contains("qwen"))
     }
 
+    /// custom_api_key（自定义模型档）也走钥匙串路由：明文残留会被收敛，config 永不落明文。
+    func testCustomAPIKeyRoutesToKeychain() throws {
+        let secrets = InMemorySecretStore()
+        let (cfg, dir) = tmpConfig(secrets, seed: #"{"custom_api_key":"sk-PLAIN","custom_polish_base_url":"https://api.deepseek.com"}"#)
+        XCTAssertEqual(cfg.string(forKey: "custom_api_key"), "sk-PLAIN")   // 迁移前明文兜底
+        cfg.reconcileSecrets()
+        XCTAssertEqual(secrets.get("custom_api_key"), "sk-PLAIN")         // 收敛进钥匙串
+        let raw = configRaw(dir)
+        XCTAssertFalse(raw.contains("sk-PLAIN"))                           // 明文已删
+        XCTAssertTrue(raw.contains("api.deepseek.com"))                    // 非 secret 保留
+    }
+
     // MARK: - reconcileSecrets
 
     func testReconcileStripsPlaintextWhenKeychainEqualOrEmpty() throws {

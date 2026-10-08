@@ -1121,6 +1121,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
     private var asrGetKeyButton: NSButton?
     private var dashscopeAPIKeyField: NSSecureTextField?
     private var arkAPIKeyField: NSSecureTextField?
+    // 自定义档（custom-model-provider）三个输入：Base URL / 模型 / API Key
+    private var customBaseURLField: NSTextField?
+    private var customModelField: NSTextField?
+    private var customAPIKeyField: NSSecureTextField?
+    private var customFetchStatus: NSTextField?   // 拉取模型列表的结果提示
     private var polishProviderControl: VPSegmentedControl?
     private var polishKeyContainer: NSStackView?
     private var polishGetKeyButton: NSButton?
@@ -4471,8 +4476,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
         // Provider selector: 通义千问 / 豆包 / 不优化（阿里润色更强，作为推荐放最前）
         // 自绘分段控件，软填充观感（详见 VPSegmentedControl）
         let current = config.string(forKey: "polish_provider") ?? "qwen"
-        // 9-15 Ray：润色只留「百炼 / 不优化」，豆包隐藏；已经选了豆包的老用户仍显示三段
-        polishSegProviders = current == "doubao" ? ["qwen", "doubao", "none"] : ["qwen", "none"]
+        // 9-15 Ray：润色只留「百炼 / 自定义 / 不优化」，豆包隐藏；已经选了豆包的老用户仍显示四段
+        polishSegProviders = current == "doubao" ? ["qwen", "doubao", "custom", "none"] : ["qwen", "custom", "none"]
         let seg = VPSegmentedControl(
             labels: polishSegProviders.map { Self.polishProviderLabel($0) },
             trackBg: theme.cardAlt,
@@ -4642,11 +4647,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
     }
 
     /// 润色分段当前显示的服务商顺序（豆包默认隐藏，见 buildPolishCard）
-    private var polishSegProviders: [String] = ["qwen", "none"]
+    private var polishSegProviders: [String] = ["qwen", "custom", "none"]
 
     private static func polishProviderLabel(_ provider: String) -> String {
         switch provider {
         case "doubao": return "火山引擎（豆包）"
+        case "custom": return "自定义"
         case "none": return "不优化"
         default: return "百炼（阿里）"
         }
@@ -4672,6 +4678,13 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
     private func refreshPolishKeyField(for provider: String) {
         guard let container = polishKeyContainer else { return }
         container.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        // 切到其他档：自定义三件套已不在视图树，清掉引用，persistModelFields 不再回存旧值
+        if provider != "custom" {
+            customBaseURLField = nil
+            customModelField = nil
+            customAPIKeyField = nil
+            customFetchStatus = nil
+        }
 
         switch provider {
         case "none":
@@ -4708,6 +4721,36 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
             polishGetKeyButton?.identifier = NSUserInterfaceItemIdentifier("https://bailian.console.aliyun.com/")
             polishTestButton?.isEnabled = true
             polishTestButton?.title = "▷ 测试连接"
+        case "custom":
+            // 三个输入：Base URL / 模型（手填 + 拉取列表）/ API Key
+            customBaseURLField = makeTextField(config.string(forKey: "custom_polish_base_url"))
+            customModelField = makeTextField(config.string(forKey: "custom_polish_model"))
+            customAPIKeyField = makeSecureField(config.string(forKey: "custom_api_key"))
+            for f in [customBaseURLField, customModelField, customAPIKeyField] { f?.delegate = self }
+
+            let baseRow = makeFieldRow(label: "Base URL", control: customBaseURLField!,
+                                       placeholder: "如 https://api.deepseek.com（OpenAI 兼容地址，一般以 /v1 结尾）")
+            container.addArrangedSubview(baseRow)
+            baseRow.widthAnchor.constraint(equalTo: container.widthAnchor).isActive = true
+
+            let modelRow = makeCustomModelRow()
+            container.addArrangedSubview(modelRow)
+            modelRow.widthAnchor.constraint(equalTo: container.widthAnchor).isActive = true
+
+            let keyRow = makeFieldRow(label: "API Key", control: customAPIKeyField!,
+                                      placeholder: "请输入该服务的 API Key")
+            container.addArrangedSubview(keyRow)
+            keyRow.widthAnchor.constraint(equalTo: container.widthAnchor).isActive = true
+
+            let cap = label("接入任意 OpenAI 兼容端点（DeepSeek、Kimi、OpenRouter、本地 Ollama 等）。Base URL 填到根即可，App 自动补 /chat/completions；API Key 只存本机钥匙串。",
+                            size: 11.5, weight: .regular, color: theme.text3)
+            cap.maximumNumberOfLines = 0
+            container.addArrangedSubview(cap)
+            cap.widthAnchor.constraint(equalTo: container.widthAnchor).isActive = true
+
+            polishGetKeyButton?.isHidden = true   // 自定义服务没有统一获取入口
+            polishTestButton?.isEnabled = true
+            polishTestButton?.title = "▷ 测试连接"
         default: // doubao
             let warn = label("⚠️ 火山引擎（豆包）润色效果一般，建议换「百炼（阿里）」。", size: 11.5, weight: .medium, color: theme.text2)
             warn.maximumNumberOfLines = 0
@@ -4737,6 +4780,94 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
         case "doubao_polish_model": return "doubao-seed-2-0-pro-260215"
         default: return ""
         }
+    }
+
+    /// 自定义档「模型」行：手填输入框 +「拉取列表」按钮 + 结果提示行。
+    private func makeCustomModelRow() -> NSView {
+        let lbl = label("模型", size: 12.5, weight: .medium, color: theme.text2)
+        customModelField?.placeholderString = "模型名，如 deepseek-chat；也可点右侧拉取"
+
+        let fetchBtn = VPButton(title: "⤓ 拉取列表", style: .secondary, size: .small,
+                                theme: theme, target: self, action: #selector(fetchCustomModelsClicked(_:)))
+
+        customFetchStatus = label("", size: 11.5, weight: .medium, color: theme.text3)
+        customFetchStatus?.maximumNumberOfLines = 0
+
+        let fieldRow = NSStackView()
+        fieldRow.orientation = .horizontal
+        fieldRow.alignment = .centerY
+        fieldRow.spacing = 8
+        if let f = customModelField {
+            f.translatesAutoresizingMaskIntoConstraints = false
+            fieldRow.addArrangedSubview(f)
+            f.heightAnchor.constraint(equalToConstant: 28).isActive = true
+            f.setContentHuggingPriority(.defaultLow, for: .horizontal)   // 输入框占满剩余宽度
+        }
+        fieldRow.addArrangedSubview(fetchBtn)
+
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 5
+        stack.addArrangedSubview(lbl)
+        stack.addArrangedSubview(fieldRow)
+        if let status = customFetchStatus {
+            stack.addArrangedSubview(status)
+            status.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        }
+        fieldRow.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        return stack
+    }
+
+    /// 自定义档「拉取列表」：用已填的 Base URL + Key 请求 GET /models，成功弹菜单选择回填。
+    @objc private func fetchCustomModelsClicked(_ sender: VPButton) {
+        persistModelFields()
+        let base = customBaseURLField?.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !base.isEmpty else {
+            setTestResult(customFetchStatus, ok: false, text: "✗ 请先填 Base URL")
+            return
+        }
+        let key = customAPIKeyField?.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            ?? config.string(forKey: "custom_api_key") ?? ""
+        sender.isEnabled = false
+        customFetchStatus?.textColor = theme.text3
+        customFetchStatus?.stringValue = "拉取中…"
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            AIPolisher().fetchCustomModels(baseURL: base, apiKey: key) { result in
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    sender.isEnabled = true
+                    switch result {
+                    case .success(let models):
+                        self.setTestResult(self.customFetchStatus, ok: true, text: "✓ 拉到 \(models.count) 个模型，点选填入：")
+                        self.presentCustomModelMenu(models: models, near: sender)
+                    case .failure(let error):
+                        self.setTestResult(self.customFetchStatus, ok: false, text: "✗ " + Self.shortError(error))
+                    }
+                }
+            }
+        }
+    }
+
+    /// 在拉取按钮上方弹模型候选菜单（点选回填模型框）。
+    /// 按钮已不在窗口里（拉取期间用户切走了档位）就不弹，避免对游离视图 popUp。
+    private func presentCustomModelMenu(models: [String], near view: NSView) {
+        guard view.window != nil else { return }
+        let menu = NSMenu()
+        for m in models {
+            let item = NSMenuItem(title: m, action: #selector(customModelPicked(_:)), keyEquivalent: "")
+            item.target = self
+            menu.addItem(item)
+        }
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: view.bounds.height + 4), in: view)
+    }
+
+    @objc private func customModelPicked(_ sender: NSMenuItem) {
+        customModelField?.stringValue = sender.title
+        persistModelFields()
+        customFetchStatus?.textColor = theme.text3
+        customFetchStatus?.stringValue = "已选择：\(sender.title)"
+        polishTestResultLabel?.stringValue = ""
     }
 
     /// 千问润色模型下拉选项：value → 展示名。顺序即下拉框顺序。
@@ -5362,6 +5493,16 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
         if bailianKeyField != nil || dashscopeAPIKeyField != nil {
             secretOK = config.saveSecret(!dsBailian.isEmpty ? dsBailian : dsPolish, forKey: "dashscope_api_key") && secretOK
         }
+        // 自定义档三件套：key 走钥匙串；Base URL / 模型是普通配置。字段为 nil（未选自定义档）时不动
+        if let f = customAPIKeyField {
+            secretOK = config.saveSecret(f.stringValue.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "custom_api_key") && secretOK
+        }
+        if let f = customBaseURLField {
+            config.save(value: f.stringValue.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "custom_polish_base_url")
+        }
+        if let f = customModelField {
+            config.save(value: f.stringValue.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "custom_polish_model")
+        }
         config.save(values: ["polish_provider": polishProviderControl.map { polishProvider(forSegment: $0.selectedSegment) } ?? "qwen"])
         if !secretOK {
             presentHistoryActionResult(success: false, message: "API Key 保存到钥匙串失败，请重试")
@@ -5445,7 +5586,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
             bailianKeyField?.stringValue = field.stringValue
         }
         let modelFields: [NSTextField?] = [bigASRAPIKeyField, bailianKeyField,
-                                           dashscopeAPIKeyField, arkAPIKeyField]
+                                           dashscopeAPIKeyField, arkAPIKeyField,
+                                           customBaseURLField, customModelField, customAPIKeyField]
         guard modelFields.contains(where: { $0 === field }) else { return }
         persistModelFields()
     }
@@ -7050,6 +7192,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
             return !(config.string(forKey: "dashscope_api_key", envKey: "DASHSCOPE_API_KEY") ?? "").isEmpty
         case "zhipu":
             return !(config.string(forKey: "zhipu_api_key", envKey: "ZHIPU_API_KEY") ?? "").isEmpty
+        case "custom":
+            // 三项齐（Base URL / 模型 / Key 且 URL 合法）才算配好
+            return AIPolisher.customPolishProvider(config: config) != nil
         case "none":
             return true   // 用户主动选了「不优化」，不是没配置
         default:

@@ -22,7 +22,7 @@ public final class VoicePolishConfig {
     /// 敏感键：存 Keychain，绝不写明文 config.json。
     static let secretKeys: Set<String> = [
         "ark_api_key", "dashscope_api_key", "bigasr_api_key",
-        "bigasr_access_token", "zhipu_api_key",
+        "bigasr_access_token", "zhipu_api_key", "custom_api_key",
     ]
 
     /// 供其他模块读取 config 文件（如热词）
