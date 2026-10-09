@@ -16,15 +16,18 @@ final class VocabularyLearningTests: XCTestCase {
     }
 
     private func skipIfChineseTokenizerMissing() throws {
-        let s = "我们测试一下"
-        var segmented = false
-        let tokenizer = NLTokenizer(unit: .word)
-        tokenizer.string = s
-        tokenizer.enumerateTokens(in: s.startIndex..<s.endIndex) { range, _ in
-            if s[range] == "测试" { segmented = true; return false }
+        // 直接探测实体识别（比基础分词更细的资产）：认不出「邝思远」是人名，
+        // expandToWord 的人名用例必挂（回退分词只能切出首字）——此时跳过。
+        let s = "明天约了邝思远一起吃饭。"
+        let tagger = NLTagger(tagSchemes: [.nameType])
+        tagger.string = s
+        var tagged = false
+        tagger.enumerateTags(in: s.startIndex..<s.endIndex, unit: .word, scheme: .nameType,
+                             options: [.omitPunctuation, .omitWhitespace, .joinNames]) { tag, range in
+            if tag == .personalName && s[range] == "邝思远" { tagged = true; return false }
             return true
         }
-        try XCTSkipUnless(segmented, "系统中文分词不可用（NLTokenizer 未切出整词）")
+        try XCTSkipUnless(tagged, "系统中文实体识别不可用（NLTagger 未识别出人名）")
     }
 
     // MARK: 选词（样本来自 Ray 本机 9 月的真实学习候选 + 词库里的专名）
