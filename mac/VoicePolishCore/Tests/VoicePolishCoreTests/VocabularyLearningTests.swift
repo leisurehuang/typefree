@@ -1,8 +1,31 @@
 import XCTest
+import NaturalLanguage
 @testable import VoicePolishCore
 
 /// 工单 #1013 A 方案：改一次就把改对的词加进词库当热词，不生成替换规则。
 final class VocabularyLearningTests: XCTestCase {
+
+    // MARK: 中文 NLP 资产探针（CI 环境守卫）
+
+    /// 下列三个用例断言「系统中文词典里有 / 分词能切出整词」，依赖系统提供的中文 NLP 资产。
+    /// GitHub 的英文系统 runner 没带这些资产：词表查不到（常用词拦不住）、
+    /// 分词退化成单字（人名只扩出首字）。资产不在时跳过；本机与带中文资产的环境照常跑。
+    private func skipIfChineseWordListMissing() throws {
+        let probe = NLEmbedding.wordEmbedding(for: .simplifiedChinese)?.contains("的") == true
+        try XCTSkipUnless(probe, "系统缺简体中文词向量（NLEmbedding），常用词判定不可用")
+    }
+
+    private func skipIfChineseTokenizerMissing() throws {
+        let s = "我们测试一下"
+        var segmented = false
+        let tokenizer = NLTokenizer(unit: .word)
+        tokenizer.string = s
+        tokenizer.enumerateTokens(in: s.startIndex..<s.endIndex) { range, _ in
+            if s[range] == "测试" { segmented = true; return false }
+            return true
+        }
+        try XCTSkipUnless(segmented, "系统中文分词不可用（NLTokenizer 未切出整词）")
+    }
 
     // MARK: 选词（样本来自 Ray 本机 9 月的真实学习候选 + 词库里的专名）
 
@@ -12,7 +35,8 @@ final class VocabularyLearningTests: XCTestCase {
         }
     }
 
-    func testCommonWordsAndFragmentsAreRejected() {
+    func testCommonWordsAndFragmentsAreRejected() throws {
+        try skipIfChineseWordListMissing()
         // 常用词：识别本来就认得，官方不建议加热词
         for w in ["松开", "域名", "玉米"] { XCTAssertFalse(VocabularyLearning.isLearnableWord(w), "\(w) 是常用词") }
         // 改字时带进来的半截词
@@ -28,7 +52,8 @@ final class VocabularyLearningTests: XCTestCase {
 
     // MARK: 扩成完整的词（纠错提取常是半截）
 
-    func testExpandsFragmentToWholeWord() {
+    func testExpandsFragmentToWholeWord() throws {
+        try skipIfChineseTokenizerMissing()
         let cases: [(String, String, String)] = [
             ("了邝", "明天约了邝思远一起吃饭。", "邝思远"),
             ("殷俊", "殷俊文负责这次的测试。", "殷俊文"),
@@ -121,7 +146,8 @@ final class VocabularyLearningTests: XCTestCase {
 
     // MARK: 该不该学（Ray 9-23 实测：李俊梅→吕俊梅 读音规则判不像，但在改名字）
 
-    func testNameFixIsLearnedEvenIfSoundRuleSaysDifferent() {
+    func testNameFixIsLearnedEvenIfSoundRuleSaysDifferent() throws {
+        try skipIfChineseTokenizerMissing()
         XCTAssertFalse(MishearingCheck.isLikelyMishearing(old: "和李", new: "和吕"), "前提：读音规则判 li / lü 不像")
         XCTAssertTrue(VocabularyLearning.shouldLearn(variant: "和李", target: "和吕", in: "我打算和吕俊梅去吃个饭"))
         XCTAssertEqual(VocabularyLearning.expandToWord("和吕", in: "我打算和吕俊梅去吃个饭"), "吕俊梅")
