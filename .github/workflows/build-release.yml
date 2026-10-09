@@ -1,0 +1,86 @@
+name: build-release
+
+# 构建 Typefree 并发 Release：
+# - push main / 手动触发：测试 + 构建 + 打 DMG，产物只传 artifact（不发版）
+# - push v* tag：以上全部 + 创建 GitHub Release（版本 = tag 名）
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write   # tag 触发时 gh release create 需要
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Test, build & package (macos-26)
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      # 核心库单测先行：失败即止，不产出任何构建物
+      - name: Core unit tests
+        working-directory: mac/VoicePolishCore
+        run: swift test
+
+      # 无证书构建：工程 Release 配置绑定了作者的 Automatic 签名团队，
+      # CI 上没有证书 → 用 CODE_SIGNING_ALLOWED=NO 编出未签名 app，随后由脚本 ad hoc 补签
+      - name: Build Typefree.app (unsigned)
+        run: |
+          xcodebuild \
+            -project mac/VoicePolish.xcodeproj \
+            -scheme VoicePolish \
+            -configuration Release \
+            -derivedDataPath mac/.build-ci \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=YES \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Derive version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            VERSION="$GITHUB_REF_NAME"
+          else
+            VERSION="ci-${GITHUB_SHA::7}"
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Ad-hoc sign & package DMG
+        run: |
+          bash mac/scripts/release_dmg.sh \
+            mac/.build-ci/Build/Products/Release/Typefree.app \
+            "dist/Typefree-${VERSION}-arm64.dmg"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Typefree-${{ env.VERSION }}-arm64
+          path: dist/*.dmg
+          if-no-files-found: error
+
+      # 仅 tag 触发发版；gh 与 GITHUB_TOKEN 均为 runner 内置。
+      # 重跑同一 tag 时 create 会撞「已存在」，降级为往现有 Release 补传产物（幂等）。
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/*.dmg \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            --verify-tag \
+          || gh release upload "$GITHUB_REF_NAME" dist/*.dmg --repo "$GITHUB_REPOSITORY" --clobber
