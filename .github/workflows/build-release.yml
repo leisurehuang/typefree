@@ -30,15 +30,23 @@ jobs:
           xcodebuild -version
           swift --version
 
-      # 核心库单测先行：失败即止，不产出任何构建物
+      # 核心库单测先行：失败即止，不产出任何构建物。
+      # 失败原因用 ::error 发成注解（Actions 日志需要登录才能看，注解在 API 里公开可读）
       - name: Core unit tests
         working-directory: mac/VoicePolishCore
-        run: swift test
+        run: |
+          set -o pipefail
+          swift test 2>&1 | tee "$RUNNER_TEMP/swift-test.log" || {
+            grep -E "error:|Fatal error|failed \(" "$RUNNER_TEMP/swift-test.log" | sort -u | head -8 \
+              | while IFS= read -r line; do echo "::error::${line}"; done
+            exit 1
+          }
 
       # 无证书构建：工程 Release 配置绑定了作者的 Automatic 签名团队，
       # CI 上没有证书 → 用 CODE_SIGNING_ALLOWED=NO 编出未签名 app，随后由脚本 ad hoc 补签
       - name: Build Typefree.app (unsigned)
         run: |
+          set -o pipefail
           xcodebuild \
             -project mac/VoicePolish.xcodeproj \
             -scheme VoicePolish \
@@ -47,7 +55,11 @@ jobs:
             ARCHS=arm64 \
             ONLY_ACTIVE_ARCH=YES \
             CODE_SIGNING_ALLOWED=NO \
-            build
+            build 2>&1 | tee "$RUNNER_TEMP/xcodebuild.log" || {
+            grep -E "error: " "$RUNNER_TEMP/xcodebuild.log" | sort -u | head -8 \
+              | while IFS= read -r line; do echo "::error::${line}"; done
+            exit 1
+          }
 
       - name: Derive version
         run: |
