@@ -96,3 +96,33 @@ jobs:
             --generate-notes \
             --verify-tag \
           || gh release upload "$GITHUB_REF_NAME" dist/*.dmg --repo "$GITHUB_REPOSITORY" --clobber
+
+      # 发版后签名 DMG 并把 appcast 提交回 main（Sparkle 更新源 + 更新历史数据源）。
+      # [skip ci] 防止这次回写再触发一轮 main 构建。私钥在仓库 Secret：SPARKLE_PRIVATE_KEY。
+      - name: Publish appcast
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          if [ -z "$SPARKLE_PRIVATE_KEY" ]; then
+            echo "::error::缺少 Secret SPARKLE_PRIVATE_KEY（64B seed||pub 的 base64）。请到仓库 Settings → Secrets and variables → Actions 配置后重跑本工作流。"
+            exit 1
+          fi
+          # 说明文本：优先 tag 注释，轻量 tag 回落到 tag 提交的说明
+          git tag -l --format='%(contents)' "$GITHUB_REF_NAME" | head -40 > /tmp/notes.txt
+          [ -s /tmp/notes.txt ] || git log -1 --pretty=%B > /tmp/notes.txt
+          # appcast 里的版本必须与 Info.plist 的 CFBundleVersion 同格式（不带 v 前缀）：
+          # Sparkle 的版本比较器把 v 前缀串判为更旧，会永远提示「无更新」。文件名/URL 里的 v 保留。
+          APP_VERSION="${GITHUB_REF_NAME#v}"
+          DMG="dist/Typefree-${VERSION}-arm64.dmg"
+          bash mac/scripts/make_appcast.sh "$DMG" "$APP_VERSION" /tmp/notes.txt \
+            "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/Typefree-${VERSION}-arm64.dmg" \
+            appcast.xml
+          # 提交回 main（种子文件已存在时要带 sha）。GITHUB_TOKEN 的提交本就不会触发工作流，
+          # [skip ci] 只是双保险。
+          BASE64="$(base64 -i appcast.xml | tr -d '\n')"
+          SHA="$(gh api "repos/$GITHUB_REPOSITORY/contents/appcast.xml" --jq '.sha' 2>/dev/null || true)"
+          ARGS=(--method PUT --field "message=chore(appcast): $GITHUB_REF_NAME [skip ci]" --field "content=$BASE64")
+          [ -n "$SHA" ] && ARGS+=(--field "sha=$SHA")
+          gh api "repos/$GITHUB_REPOSITORY/contents/appcast.xml" "${ARGS[@]}" --jq '.commit.html_url'

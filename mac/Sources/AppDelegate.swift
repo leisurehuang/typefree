@@ -15,7 +15,8 @@ enum AppLinks {
     /// 开源代码仓库（GPL-3.0，Mac 版源码在 mac/ 目录）。
     static let sourceCodeURL = "https://github.com/kdsz001/typefree"
     /// Sparkle 更新源；同时作为 App 内「更新历史」的数据源（含各版本日期与更新说明）。
-    static let appcastURL = "https://typefree.app/appcast.xml"
+    /// fork 版指向本仓库的 appcast（CI 发版时自动签名回写），官方通道已切断。
+    static let appcastURL = "https://raw.githubusercontent.com/leisurehuang/typefree/main/appcast.xml"
 }
 
 extension Bundle {
