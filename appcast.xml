@@ -1,6 +1,21 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
     <channel>
+        <item>
+            <title>版本 3.0.13</title>
+            <pubDate>Sat, 10 Oct 2026 13:18:22 +0000</pubDate>
+            <sparkle:version>3.0.13</sparkle:version>
+            <sparkle:shortVersionString>3.0.13</sparkle:shortVersionString>
+            <description><![CDATA[release: v3.0.13 更新通道切换到本 fork（Sparkle 自更新闭环）
+
+- SUFeedURL/AppLinks.appcastURL 指向 raw.githubusercontent.com/leisurehuang/typefree/main/appcast.xml
+- SUPublicEDKey 换为 fork 专属 Ed25519 公钥；私钥在仓库 Secret SPARKLE_PRIVATE_KEY
+- 新增 make_appcast.sh + appcast_sign.swift：CryptoKit 签名与 Sparkle edSignature 逐字节一致
+- CI tag 发版后自动签名 DMG、生成 appcast 条目并提交回 main（版本无 v 前缀，与 CFBundleVersion 同格式）
+- 种子空 appcast.xml 落仓库根；官方更新通道彻底切断]]></description>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/leisurehuang/typefree/releases/download/v3.0.13/Typefree-v3.0.13-arm64.dmg" sparkle:edSignature="1pj9FebSdV+mGg7st/FzI6tllqx3k8Ips14Y9JzvXGFFTw4Si9ooBNsoMFNoX4Fdk7sglHoGWZ+GlvHr7gxPCw==" length="2755355" type="application/octet-stream"/>
+        </item>
         <title>Typefree</title>
         <link>https://github.com/leisurehuang/typefree</link>
         <description>Typefree fork 更新</description>
