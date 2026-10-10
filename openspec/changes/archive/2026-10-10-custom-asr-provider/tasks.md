@@ -21,4 +21,4 @@
 - [x] 3.1 本机门禁：XCTest 桩 typecheck 全测试文件 + ScratchVerify 断言全绿（验证后删除）
 - [x] 3.2 App 源码 swiftc -typecheck 绿
 - [x] 3.3 独立评审（spec vs 实现）
-- [ ] 3.4 push 后 CI `swift test` 全绿（含跳过守卫）
+- [x] 3.4 push 后 CI `swift test` 全绿（含跳过守卫）
