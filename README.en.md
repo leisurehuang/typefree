@@ -33,7 +33,20 @@ In any app's text field, hold a hotkey or the left mouse button and talk. When y
 - **Voice translation** — end your sentence with "in Chinese" (or "Japanese", "Korean"…) and it is typed in that language
 - **Learns from your fixes** — correct a misheard name or product term once and it is recognized next time; you can also add words to your vocabulary
 - **History** — everything you dictate is stored encrypted on your Mac, exportable, kept as long as you choose
-- **Multiple providers** — Volcengine for speech recognition, Qwen for cleanup, with the model picked automatically by quality and speed
+- **Multiple providers** — Volcengine for speech recognition, Qwen for cleanup, with the model picked automatically by quality and speed; this fork additionally accepts any OpenAI-compatible endpoint (see below)
+
+## Fork differences (vs upstream [kdsz001/typefree](https://github.com/kdsz001/typefree))
+
+Everything upstream is preserved; on top of that (each item ships with an OpenSpec spec and tests, archived under `openspec/changes/archive/`):
+
+| Feature | Notes |
+|---|---|
+| **Custom polish / ask-AI model** | A "Custom" provider in Settings → Models → Speech cleanup: enter Base URL + model + API key to use any OpenAI-compatible endpoint (DeepSeek, Kimi, OpenRouter, local Ollama, …). The model can be typed by hand or fetched from `/models`; once configured it counts as bring-your-own-key and connects directly |
+| **Custom speech recognition** | A "Custom" provider for recognition: standard `POST {Base}/audio/transcriptions` with WAV upload — works with SiliconFlow SenseVoice-Small (free, strong for Chinese), Groq whisper-large-v3-turbo (free tier) and any compatible endpoint. No hot-word biasing; vocabulary-based post-correction still applies |
+| **Update channel points at this repo** | Sparkle reads this repo's `appcast.xml` (signed and committed by CI on each release) with a fork-specific Ed25519 key — no more being upgraded to the official build and losing the custom features |
+| **GitHub Actions CI** | Pushes run tests + build; pushing a `v*` tag publishes a Release end to end: tests → build → ad-hoc signing → DMG → appcast update |
+
+API keys still live only in the local keychain and never pass through any middleman. CI builds are ad-hoc signed — right-click → Open on first launch. Upstream changes are synced periodically by merging `kdsz001:main`.
 
 Chinese and English speech are both supported. The cleanup prompts are tuned first for Chinese, so that is where it shines most.
 
@@ -88,6 +101,8 @@ Details, directory layout and tests: [mac/README.md](mac/README.md) (Chinese, wi
 ## Repository layout
 
 - `mac/` — the complete macOS app (Swift, GPL-3.0)
+- `openspec/` — this fork's specs and change archive (spec-driven workflow)
+- `.github/workflows/` — CI: test, build, release (added by the fork)
 - root — the website [typefree.app](https://typefree.app) (GitHub Pages)
 
 ## License and trademark

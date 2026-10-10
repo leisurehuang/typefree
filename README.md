@@ -33,7 +33,20 @@
 - **语音翻译**：说完正文，结尾加一句「用英文」，这句直接输入成英文；日文、韩文同理
 - **越用越准**：识别错的人名、产品名，你改过一次，下次自动认对；常用词也可以加进词库
 - **历史记录**：所有输入在本机加密保存，可导出，保留多久自己定
-- **多家模型**：识别用火山引擎，整理用通义千问，模型按质量和速度自动选
+- **多家模型**：识别用火山引擎，整理用通义千问，模型按质量和速度自动选；本 fork 另支持任意 OpenAI 兼容端点（见下）
+
+## 本 Fork 的差异（相对上游 [kdsz001/typefree](https://github.com/kdsz001/typefree)）
+
+在保留上游全部功能的基础上新增（每项都有 OpenSpec 规格与测试，归档于 `openspec/changes/archive/`）：
+
+| 能力 | 说明 |
+|---|---|
+| **自定义润色 / 问 AI 模型** | 「设置 → 模型 → 语音优化」服务商新增「自定义」档：Base URL + 模型 + API Key 三项自填，接入任意 OpenAI 兼容端点（DeepSeek、Kimi、OpenRouter、本地 Ollama 等）；模型可手填或「拉取列表」从 `/models` 获取，配好即视为自带 Key 直连 |
+| **自定义语音识别** | 「语音识别」服务商新增「自定义」档：标准 `POST {Base}/audio/transcriptions` 上传 WAV，可接硅基流动 SenseVoice-Small（免费、中文强）、Groq whisper-large-v3-turbo（免费档）等任意兼容端点；不支持热词 biasing，词库后处理纠错照常生效 |
+| **更新通道指向本仓库** | Sparkle 检查更新读本仓库的 `appcast.xml`（发版时 CI 自动签名回写），fork 专属 Ed25519 签名——不会再被引导升级官方版而丢失自定义功能 |
+| **GitHub Actions CI** | push 自动跑测试 + 构建；打 `v*` tag 自动发 Release：测试 → 构建 → ad hoc 签名 → DMG → 更新 appcast 一条龙 |
+
+说明：API Key 仍然只存本机钥匙串、不经过任何中间服务器；CI 产物为 ad hoc 签名，首次打开需右键 → 「打开」。上游更新通过合并 `kdsz001:main` 定期同步。
 
 ## 三种用法
 
@@ -86,6 +99,8 @@ bash scripts/install_app.sh     # 安装到 /Applications
 ## 仓库结构
 
 - `mac/` — macOS App 完整源码（Swift，GPL-3.0）
+- `openspec/` — 本 fork 的规格与变更归档（spec-driven 开发流程）
+- `.github/workflows/` — CI：测试、构建、发版（fork 新增）
 - 根目录 — 官网 [typefree.app](https://typefree.app)（GitHub Pages）
 
 ## 许可与商标
