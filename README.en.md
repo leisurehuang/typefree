@@ -46,7 +46,18 @@ Everything upstream is preserved; on top of that (each item ships with an OpenSp
 | **Update channel points at this repo** | Sparkle reads this repo's `appcast.xml` (signed and committed by CI on each release) with a fork-specific Ed25519 key — no more being upgraded to the official build and losing the custom features |
 | **GitHub Actions CI** | Pushes run tests + build; pushing a `v*` tag publishes a Release end to end: tests → build → ad-hoc signing → DMG → appcast update |
 
-API keys still live only in the local keychain and never pass through any middleman. CI builds are ad-hoc signed — right-click → Open on first launch. Upstream changes are synced periodically by merging `kdsz001:main`.
+API keys still live only in the local keychain and never pass through any middleman. Upstream changes are synced periodically by merging `kdsz001:main`.
+
+### Installing the unsigned build
+
+CI builds are ad-hoc signed (no developer certificate). In most cases **right-click → Open** is enough; if macOS still says the app "is damaged and can't be opened" or it refuses to launch, run these two commands in Terminal and it will open normally afterwards:
+
+```bash
+xattr -c "/Applications/Typefree.app"
+codesign --force --deep --sign - "/Applications/Typefree.app"
+```
+
+The first clears the download quarantine attribute, the second re-signs the app locally — it only affects this one copy and does not change any system security settings.
 
 Chinese and English speech are both supported. The cleanup prompts are tuned first for Chinese, so that is where it shines most.
 

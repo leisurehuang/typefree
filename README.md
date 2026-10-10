@@ -46,7 +46,18 @@
 | **更新通道指向本仓库** | Sparkle 检查更新读本仓库的 `appcast.xml`（发版时 CI 自动签名回写），fork 专属 Ed25519 签名——不会再被引导升级官方版而丢失自定义功能 |
 | **GitHub Actions CI** | push 自动跑测试 + 构建；打 `v*` tag 自动发 Release：测试 → 构建 → ad hoc 签名 → DMG → 更新 appcast 一条龙 |
 
-说明：API Key 仍然只存本机钥匙串、不经过任何中间服务器；CI 产物为 ad hoc 签名，首次打开需右键 → 「打开」。上游更新通过合并 `kdsz001:main` 定期同步。
+说明：API Key 仍然只存本机钥匙串、不经过任何中间服务器。上游更新通过合并 `kdsz001:main` 定期同步。
+
+### 安装未签名版
+
+CI 产物为 ad hoc 签名（无开发者证书）。多数情况**右键 →「打开」**即可通过；若仍提示「已损坏，无法打开」或无法启动，在终端执行这两条命令后即可正常双击打开：
+
+```bash
+xattr -c "/Applications/Typefree.app"
+codesign --force --deep --sign - "/Applications/Typefree.app"
+```
+
+第一条清掉下载带来的隔离属性，第二条在本机重签——只影响这一份 App，不改变系统安全设置。
 
 ## 三种用法
 
