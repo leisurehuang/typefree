@@ -7,13 +7,13 @@
 <p align="center"><b>macOS 上的 AI 语音输入：按住说话，松手时文字已经整理好、进了光标处。</b></p>
 
 <p align="center">
-  <a href="https://github.com/kdsz001/typefree/releases/latest"><img src="https://img.shields.io/github/v/release/kdsz001/typefree?label=%E6%9C%80%E6%96%B0%E7%89%88&color=1d1d1f" alt="最新版"></a>
+  <a href="https://github.com/leisurehuang/typefree/releases/latest"><img src="https://img.shields.io/github/v/release/leisurehuang/typefree?label=%E6%9C%80%E6%96%B0%E7%89%88&color=1d1d1f" alt="最新版"></a>
   <a href="mac/LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-1d1d1f" alt="GPL-3.0"></a>
   <img src="https://img.shields.io/badge/macOS-14%2B-1d1d1f" alt="macOS 14+">
 </p>
 
 <p align="center">
-  <a href="https://github.com/kdsz001/typefree/releases/latest/download/Typefree.dmg"><b>下载 Mac 版</b></a> ·
+  <a href="https://github.com/leisurehuang/typefree/releases/latest/download/Typefree.dmg"><b>下载 Mac 版</b></a> ·
   <a href="https://typefree.app">官网</a> ·
   <a href="https://typefree.app/setup-guide.html">API Key 配置教程</a> ·
   <a href="README.en.md">English</a>
@@ -52,7 +52,7 @@
 
 | | 怎么开始 | 费用 |
 |---|---|---|
-| **免费试用** | [下载 DMG](https://github.com/kdsz001/typefree/releases/latest/download/Typefree.dmg)，装好就能用，不用配任何东西 | 7 天免费，由作者承担 |
+| **免费试用** | [下载 DMG](https://github.com/leisurehuang/typefree/releases/latest/download/Typefree.dmg)，装好就能用，不用配任何东西 | 7 天免费，由作者承担 |
 | **自带 Key** | 在「设置 → 模型」填入你自己的 API Key（[教程](https://typefree.app/setup-guide.html)，几分钟） | **永久免费，不限字数**；费用走你自己的账户 |
 | **会员** | 不想申请 Key，就开通会员，识别、整理、问 AI 全包 | ¥188 / 年 |
 
@@ -88,7 +88,7 @@
 要求 macOS 14+、Xcode 26.3。
 
 ```bash
-git clone https://github.com/kdsz001/typefree.git
+git clone https://github.com/leisurehuang/typefree.git
 cd typefree/mac
 ./build.sh                      # 产物在 dist/
 bash scripts/install_app.sh     # 安装到 /Applications
@@ -110,5 +110,5 @@ bash scripts/install_app.sh     # 安装到 /Applications
 ## 反馈
 
 - App 侧栏的「反馈」页可以直接和作者对话，能附截图
-- 或者提 [Issue](https://github.com/kdsz001/typefree/issues)：bug、想法、识别不准的例子都行
+- 或者提 [Issue](https://github.com/leisurehuang/typefree/issues)：bug、想法、识别不准的例子都行
 - Pull Request 目前只接受小修，见 [CONTRIBUTING](mac/CONTRIBUTING.md)

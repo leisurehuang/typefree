@@ -84,12 +84,14 @@ jobs:
           if-no-files-found: error
 
       # 仅 tag 触发发版；gh 与 GITHUB_TOKEN 均为 runner 内置。
+      # 额外上传一份固定名 Typefree.dmg，README 的 releases/latest/download/Typefree.dmg 直链才有效。
       # 重跑同一 tag 时 create 会撞「已存在」，降级为往现有 Release 补传产物（幂等）。
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          cp "dist/Typefree-${VERSION}-arm64.dmg" dist/Typefree.dmg
           gh release create "$GITHUB_REF_NAME" dist/*.dmg \
             --repo "$GITHUB_REPOSITORY" \
             --title "$GITHUB_REF_NAME" \

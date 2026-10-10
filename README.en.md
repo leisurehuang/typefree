@@ -7,13 +7,13 @@
 <p align="center"><b>AI voice input for macOS: hold, talk, release — the text is already cleaned up and sitting at your cursor.</b></p>
 
 <p align="center">
-  <a href="https://github.com/kdsz001/typefree/releases/latest"><img src="https://img.shields.io/github/v/release/kdsz001/typefree?label=release&color=1d1d1f" alt="Latest release"></a>
+  <a href="https://github.com/leisurehuang/typefree/releases/latest"><img src="https://img.shields.io/github/v/release/leisurehuang/typefree?label=release&color=1d1d1f" alt="Latest release"></a>
   <a href="mac/LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-1d1d1f" alt="GPL-3.0"></a>
   <img src="https://img.shields.io/badge/macOS-14%2B-1d1d1f" alt="macOS 14+">
 </p>
 
 <p align="center">
-  <a href="https://github.com/kdsz001/typefree/releases/latest/download/Typefree.dmg"><b>Download for Mac</b></a> ·
+  <a href="https://github.com/leisurehuang/typefree/releases/latest/download/Typefree.dmg"><b>Download for Mac</b></a> ·
   <a href="https://typefree.app/index.en.html">Website</a> ·
   <a href="https://typefree.app/setup-guide.en.html">API key setup guide</a> ·
   <a href="README.md">中文</a>
@@ -54,7 +54,7 @@ Chinese and English speech are both supported. The cleanup prompts are tuned fir
 
 | | How to start | Cost |
 |---|---|---|
-| **Free trial** | [Download the DMG](https://github.com/kdsz001/typefree/releases/latest/download/Typefree.dmg) and start talking — nothing to configure | Free for 7 days, paid for by the author |
+| **Free trial** | [Download the DMG](https://github.com/leisurehuang/typefree/releases/latest/download/Typefree.dmg) and start talking — nothing to configure | Free for 7 days, paid for by the author |
 | **Bring your own key** | Paste your own API key under Settings → Models ([guide](https://typefree.app/setup-guide.en.html), a few minutes) | **Free forever, no word limit**; usage is billed to your own account |
 | **Membership** | Don't want to get a key? Membership covers recognition, cleanup and Ask AI | $26 / year |
 
@@ -90,7 +90,7 @@ Full details in the [privacy policy](https://typefree.app/privacy.en.html).
 Requires macOS 14+ and Xcode 26.3.
 
 ```bash
-git clone https://github.com/kdsz001/typefree.git
+git clone https://github.com/leisurehuang/typefree.git
 cd typefree/mac
 ./build.sh                      # output in dist/
 bash scripts/install_app.sh     # installs to /Applications
@@ -112,5 +112,5 @@ The code is licensed under the [GNU GPL-3.0](mac/LICENSE): use, modify and redis
 ## Feedback
 
 - The "Feedback" page in the app's sidebar talks straight to the author, screenshots included
-- Or open an [issue](https://github.com/kdsz001/typefree/issues): bugs, ideas, examples of bad transcripts are all welcome, in English or Chinese
+- Or open an [issue](https://github.com/leisurehuang/typefree/issues): bugs, ideas, examples of bad transcripts are all welcome, in English or Chinese
 - Pull requests are currently limited to small fixes — see [CONTRIBUTING](mac/CONTRIBUTING.md)
