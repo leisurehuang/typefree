@@ -6,6 +6,7 @@ public final class CloudASRTranscriber {
     public enum ASRProvider {
         case volcano   // 火山引擎
         case bailian   // 阿里百炼（DashScope）
+        case custom    // 自定义 OpenAI 兼容 /audio/transcriptions 端点
     }
 
     /// 可切换的识别版本，各有独立免费额度：火山三档 + 百炼一档。
@@ -15,21 +16,23 @@ public final class CloudASRTranscriber {
         case standard   // 火山标准版 1.0：异步 submit + 轮询 query
         case v2         // 火山 2.0(seedasr)：异步 submit + 轮询 query
         case bailian    // 百炼 qwen3-asr-flash：同步 OpenAI 兼容接口
+        case custom     // 自定义 OpenAI 兼容 /audio/transcriptions（模型名读 custom_asr_model）
 
         public var provider: ASRProvider {
             switch self {
             case .turbo, .standard, .v2: return .volcano
             case .bailian: return .bailian
+            case .custom: return .custom
             }
         }
 
-        /// 火山调用时填入 X-Api-Resource-Id 的值（百炼不用）
+        /// 火山调用时填入 X-Api-Resource-Id 的值（百炼/自定义不用）
         public var resourceID: String {
             switch self {
             case .turbo: return "volc.bigasr.auc_turbo"
             case .standard: return "volc.bigasr.auc"
             case .v2: return "volc.seedasr.auc"
-            case .bailian: return ""
+            case .bailian, .custom: return ""
             }
         }
 
@@ -37,13 +40,14 @@ public final class CloudASRTranscriber {
             switch self {
             case .turbo, .standard, .v2: return resourceID
             case .bailian: return "qwen3-asr-flash"
+            case .custom: return ""   // 模型名读 custom_asr_model（transcribeCustom 自取）
             }
         }
 
-        /// true = 同步一步出结果（极速版、百炼）；false = 异步 submit/query（火山标准版/2.0）
+        /// true = 同步一步出结果（极速版、百炼、自定义）；false = 异步 submit/query（火山标准版/2.0）
         public var isSync: Bool {
             switch self {
-            case .turbo, .bailian: return true
+            case .turbo, .bailian, .custom: return true
             case .standard, .v2: return false
             }
         }
@@ -55,16 +59,18 @@ public final class CloudASRTranscriber {
             case .standard: return "标准版"
             case .v2: return "2.0"
             case .bailian: return "百炼"
+            case .custom: return "自定义"
             }
         }
 
-        /// 建议切换顺序：火山 极速→标准→2.0→百炼（百炼需配 DashScope Key 才会真正用上）→ nil
+        /// 建议切换顺序：火山 极速→标准→2.0→百炼（百炼需配 DashScope Key 才会真正用上）→ nil。
+        /// 自定义档不进链：端点各异、无「额度用完换档」一说，失败原样回报。
         public var nextForFallback: ASRVersion? {
             switch self {
             case .turbo: return .standard
             case .standard: return .v2
             case .v2: return .bailian
-            case .bailian: return nil
+            case .bailian, .custom: return nil
             }
         }
     }
@@ -137,16 +143,17 @@ public final class CloudASRTranscriber {
         isConfigured(version: currentVersion())
     }
 
-    /// 当前版本对应服务商的凭证是否已配置。
-    public func isConfigured(version: ASRVersion) -> Bool {
-        switch version.provider {
-        case .volcano: return volcanoCredentials() != nil
-        case .bailian: return dashscopeAPIKey() != nil
+        /// 当前版本对应服务商的凭证是否已配置。
+        public func isConfigured(version: ASRVersion) -> Bool {
+            switch version.provider {
+            case .volcano: return volcanoCredentials() != nil
+            case .bailian: return dashscopeAPIKey() != nil
+            case .custom: return Self.customASRProvider(config: config) != nil
+            }
         }
-    }
 
     public func missingConfigurationHint() -> String {
-        "请配置火山引擎的 bigasr_api_key，或阿里百炼的 dashscope_api_key"
+        "请配置火山引擎的 bigasr_api_key，或阿里百炼的 dashscope_api_key；用其他 OpenAI 兼容转写服务请在识别服务商里选「自定义」"
     }
 
     // MARK: - 当前识别版本
@@ -213,7 +220,9 @@ public final class CloudASRTranscriber {
     public func transcribeAuto(samples: [Float], sampleRate: Int = 16000, version: ASRVersion, completion: @escaping (Result<String, Error>) -> Void) {
         // 百炼限流是 100 RPM 且突发按秒级（约 1.6 次/秒）判定，一口气 5 段易被拒且其报错不走重试，
         // 故百炼降到 2 路并发；火山极速版官方默认 5 并发、标准版/2.0 为 20 QPS，用满 5 路没问题。
-        let maxConcurrent = min(chunkMaxConcurrent(), version == .bailian ? 2 : Int.max)
+        // 自定义档普遍是免费/低配额端点（Groq 20 RPM 量级），同样压到 2 路。
+        let rateLimited: Bool = version == .bailian || version == .custom
+        let maxConcurrent = min(chunkMaxConcurrent(), rateLimited ? 2 : Int.max)
         guard maxConcurrent > 1 else {
             transcribe(samples: samples, sampleRate: sampleRate, version: version, completion: completion)
             return
@@ -250,10 +259,12 @@ public final class CloudASRTranscriber {
 
     /// 用指定版本识别。
     public func transcribe(samples: [Float], sampleRate: Int = 16000, version: ASRVersion, completion: @escaping (Result<String, Error>) -> Void) {
-        // 优先压缩为 AAC/M4A 上传（体积约为 WAV 的 1/10，弱网更快、更不易超时），编码失败回退 WAV
+        // 优先压缩为 AAC/M4A 上传（体积约为 WAV 的 1/10，弱网更快、更不易超时），编码失败回退 WAV。
+        // 自定义档固定 WAV：转写端点对 WAV 的兼容性最稳（M4A 支持面参差）。
         let audioData: Data
         let audioFormat: String
-        if let m4aData = M4AEncoder.makeM4AData(from: samples, sampleRate: sampleRate), !m4aData.isEmpty {
+        let preferWAV = version.provider == .custom
+        if !preferWAV, let m4aData = M4AEncoder.makeM4AData(from: samples, sampleRate: sampleRate), !m4aData.isEmpty {
             audioData = m4aData
             audioFormat = "m4a"
         } else if let wavData = WAVEncoder.makeWAVData(from: samples, sampleRate: sampleRate), !wavData.isEmpty {
@@ -326,7 +337,104 @@ public final class CloudASRTranscriber {
             }
             debugLog?("Cloud ASR: version=\(version.rawValue) provider=bailian model=\(Self.bailianModel) audio=\(audioFormat)/\(audioData.count / 1024)KB budget=\(Int(budget))s")
             transcribeBailian(audioData: audioData, format: audioFormat, apiKey: apiKey, budgetSeconds: budget, completion: completion)
+        case .custom:
+            guard let custom = Self.customASRProvider() else {
+                completion(.failure(TranscriptionError.missingCredentials))
+                return
+            }
+            debugLog?("Cloud ASR: provider=custom url=\(custom.url.absoluteString) model=\(custom.model) audio=\(audioFormat)/\(audioData.count / 1024)KB budget=\(Int(budget))s")
+            transcribeCustom(url: custom.url, model: custom.model, apiKey: custom.apiKey,
+                             wavData: audioData, budgetSeconds: budget, completion: completion)
         }
+    }
+
+    // MARK: - 自定义（OpenAI 兼容 /audio/transcriptions）
+
+    /// 自定义识别档配置解析：Base URL / 模型 / API Key 三项齐且 URL 合法才算已配置（等价自带 Key）。
+    /// static + 传 config 便于单测；key 的 env 兜底 CUSTOM_ASR_API_KEY。
+    public static func customASRProvider(config: VoicePolishConfig = .shared) -> (url: URL, model: String, apiKey: String)? {
+        guard let key = config.string(forKey: "custom_asr_api_key", envKey: "CUSTOM_ASR_API_KEY"),
+              let base = config.string(forKey: "custom_asr_base_url"),
+              let model = config.string(forKey: "custom_asr_model"),
+              let url = customTranscriptionsURL(from: base) else { return nil }
+        return (url, model, key)
+    }
+
+    /// 拼 /audio/transcriptions 端点（规整规则与润色档共用，见 CustomEndpoint）。
+    static func customTranscriptionsURL(from base: String?) -> URL? {
+        CustomEndpoint.url(from: base, path: "/audio/transcriptions")
+    }
+
+    /// multipart 请求体（纯函数便于单测）：file(audio.wav, audio/wav) + model + response_format=json。
+    /// 不传 language：让模型自动判语言，中英混说更稳。
+    static func multipartBody(boundary: String, wavData: Data, model: String) -> Data {
+        var body = Data()
+        func append(_ s: String) { body.append(Data(s.utf8)) }
+        append("--\(boundary)\r\n")
+        append("Content-Disposition: form-data; name=\"file\"; filename=\"audio.wav\"\r\n")
+        append("Content-Type: audio/wav\r\n\r\n")
+        body.append(wavData)
+        append("\r\n--\(boundary)\r\n")
+        append("Content-Disposition: form-data; name=\"model\"\r\n\r\n\(model)\r\n")
+        append("--\(boundary)\r\n")
+        append("Content-Disposition: form-data; name=\"response_format\"\r\n\r\njson\r\n")
+        append("--\(boundary)--\r\n")
+        return body
+    }
+
+    /// 响应解析（纯函数）：json 取 .text；OpenAI 形状的服务端错误翻成人话；解析不了报 parseError。
+    static func parseTranscriptionsResponse(data: Data) -> Result<String, TranscriptionError> {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return .failure(.parseError)
+        }
+        if let text = json["text"] as? String {
+            return .success(text.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        if let message = AIPolisher.extractAPIErrorMessage(from: json) {
+            return .failure(.serverFailed(message: message))
+        }
+        return .failure(.parseError)
+    }
+
+    /// 自定义档识别：multipart 直发，错误（含 401/429）原样回报，不重试不降级。
+    private func transcribeCustom(url: URL, model: String, apiKey: String, wavData: Data,
+                                  budgetSeconds: TimeInterval, completion: @escaping (Result<String, Error>) -> Void) {
+        let boundary = "typefree-\(UUID().uuidString)"
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = budgetSeconds
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.httpBody = Self.multipartBody(boundary: boundary, wavData: wavData, model: model)
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error = error {
+                completion(.failure(TranscriptionError.network(underlying: error)))
+                return
+            }
+            guard let data = data else {
+                completion(.failure(TranscriptionError.noData))
+                return
+            }
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            switch Self.parseTranscriptionsResponse(data: data) {
+            case .success(let text):
+                guard (200..<300).contains(status) else {
+                    // 正常响应形状但状态码不对（少见）：仍按错误走，报出状态码
+                    completion(.failure(TranscriptionError.serverFailed(message: "识别服务返回 HTTP \(status)")))
+                    return
+                }
+                // 静音/无语音：OpenAI 兼容端点普遍 200 + 空文本，对齐既有 noSpeech 语义
+                // （测试连接把 noSpeech 判为「链路通」，正常输入显示「没听到」）。
+                completion(text.isEmpty ? .failure(TranscriptionError.noSpeech) : .success(text))
+            case .failure(let err):
+                // 非 2xx 且解析不出人话（如网关返回 HTML 页）时至少带出状态码；其余原样回报
+                if !(200..<300).contains(status), case .parseError = err {
+                    completion(.failure(TranscriptionError.serverFailed(message: "识别服务返回 HTTP \(status)")))
+                } else {
+                    completion(.failure(err))
+                }
+            }
+        }.resume()
     }
 
     /// 按音频时长给出识别等待预算：基础 20s + 时长×0.5，封顶 600s（10 分钟）。

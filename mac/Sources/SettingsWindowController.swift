@@ -1115,6 +1115,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
 
     private var bigASRAPIKeyField: NSSecureTextField?
     private var bailianKeyField: NSSecureTextField?
+    // 自定义识别档（custom-asr-provider）三个输入：Base URL / 模型 / API Key
+    private var customASRBaseURLField: NSTextField?
+    private var customASRModelField: NSTextField?
+    private var customASRKeyField: NSSecureTextField?
     private var asrVersionControl: VPSegmentedControl?
     private var asrProviderControl: VPSegmentedControl?
     private var asrKeyContainer: NSStackView?
@@ -4041,7 +4045,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
     }
 
     @objc private func asrProviderChanged(_ sender: VPSegmentedControl) {
-        let provider: CloudASRTranscriber.ASRProvider = (sender.selectedSegment == 1) ? .bailian : .volcano
+        let provider: CloudASRTranscriber.ASRProvider
+        switch sender.selectedSegment {
+        case 1: provider = .bailian
+        case 2: provider = .custom
+        default: provider = .volcano
+        }
         switch provider {
         case .volcano:
             // 回到火山：之前若就是火山某档则保留，否则用极速版
@@ -4050,6 +4059,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
             config.save(values: ["bigasr_version": v.rawValue])
         case .bailian:
             config.save(values: ["bigasr_version": "bailian"])
+        case .custom:
+            config.save(values: ["bigasr_version": "custom"])
         }
         refreshASRFields(for: provider)
         // 识别服务商变了，优化卡片可能要在「填框」和「已复用」之间切换，刷新一下
@@ -4062,6 +4073,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
     private func refreshASRFields(for provider: CloudASRTranscriber.ASRProvider) {
         guard let container = asrKeyContainer else { return }
         container.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        // 切到其他服务商：自定义三件套已不在视图树，清掉引用，persistModelFields 不再回存旧值
+        if provider != .custom {
+            customASRBaseURLField = nil
+            customASRModelField = nil
+            customASRKeyField = nil
+        }
 
         switch provider {
         case .volcano:
@@ -4094,6 +4111,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
             versionRow.widthAnchor.constraint(equalTo: container.widthAnchor).isActive = true
             versionSeg.widthAnchor.constraint(equalTo: versionRow.widthAnchor).isActive = true
 
+            asrGetKeyButton?.isHidden = false
             asrGetKeyButton?.identifier = NSUserInterfaceItemIdentifier(AppLinks.apiKeyGuideURL)
 
         case .bailian:
@@ -4109,7 +4127,38 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
             container.addArrangedSubview(modelHint)
             modelHint.widthAnchor.constraint(equalTo: container.widthAnchor).isActive = true
 
+            asrGetKeyButton?.isHidden = false
             asrGetKeyButton?.identifier = NSUserInterfaceItemIdentifier("https://bailian.console.aliyun.com/")
+
+        case .custom:
+            // 自定义 OpenAI 兼容转写端点：三输入，无版本行（自定义无版本概念）
+            customASRBaseURLField = makeTextField(config.string(forKey: "custom_asr_base_url"))
+            customASRModelField = makeTextField(config.string(forKey: "custom_asr_model"))
+            customASRKeyField = makeSecureField(config.string(forKey: "custom_asr_api_key"))
+            for f in [customASRBaseURLField, customASRModelField, customASRKeyField] { f?.delegate = self }
+
+            let baseRow = makeFieldRow(label: "Base URL", control: customASRBaseURLField!,
+                                       placeholder: "如 https://api.siliconflow.cn/v1（OpenAI 兼容地址）")
+            container.addArrangedSubview(baseRow)
+            baseRow.widthAnchor.constraint(equalTo: container.widthAnchor).isActive = true
+
+            let modelRow = makeFieldRow(label: "模型", control: customASRModelField!,
+                                        placeholder: "模型名，如 SenseVoice-Small / whisper-large-v3-turbo")
+            container.addArrangedSubview(modelRow)
+            modelRow.widthAnchor.constraint(equalTo: container.widthAnchor).isActive = true
+
+            let keyRow = makeFieldRow(label: "API Key", control: customASRKeyField!,
+                                      placeholder: "请输入该服务的 API Key")
+            container.addArrangedSubview(keyRow)
+            keyRow.widthAnchor.constraint(equalTo: container.widthAnchor).isActive = true
+
+            let cap = label("接入任意 OpenAI 兼容转写端点（硅基流动 SenseVoice-Small 免费、Groq whisper 免费档等）。Base URL 填到根即可，App 自动补 /audio/transcriptions 并上传 WAV；Key 只存本机钥匙串。不支持热词，词库纠错照常生效。",
+                            size: 11.5, weight: .regular, color: theme.text3)
+            cap.maximumNumberOfLines = 0
+            container.addArrangedSubview(cap)
+            cap.widthAnchor.constraint(equalTo: container.widthAnchor).isActive = true
+
+            asrGetKeyButton?.isHidden = true   // 自定义服务没有统一获取入口
         }
     }
 
@@ -4117,6 +4166,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
         switch provider {
         case .volcano: return 0
         case .bailian: return 1
+        case .custom: return 2
         }
     }
 
@@ -4125,7 +4175,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
         case .turbo: return 0
         case .standard: return 1
         case .v2: return 2
-        case .bailian: return 0
+        case .bailian, .custom: return 0
         }
     }
 
@@ -4377,10 +4427,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
                           size: 12.5, weight: .regular, color: theme.text3)
         desc.maximumNumberOfLines = 0
 
-        // 服务商分段：火山引擎 / 百炼(阿里)
+        // 服务商分段：火山引擎 / 百炼(阿里) / 自定义（OpenAI 兼容转写端点）
         let providerLabel = label("服务商", size: 12.5, weight: .medium, color: theme.text2)
         let providerSeg = VPSegmentedControl(
-            labels: ["火山引擎（豆包）", "百炼（阿里）"],
+            labels: ["火山引擎（豆包）", "百炼（阿里）", "自定义"],
             trackBg: theme.cardAlt, trackBorder: theme.sep,
             selBg: theme.segSelBg, selBorder: theme.sep,
             selText: theme.text, normalText: theme.text2,
@@ -4388,8 +4438,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
         let asrProviderNow = CloudASRTranscriber().currentVersion().provider
         providerSeg.selectedSegment = Self.asrProviderSegmentIndex(for: asrProviderNow)
         asrProviderControl = providerSeg
-        // 9-15 Ray：识别服务商只留火山，百炼选项隐藏；已经在用百炼的老用户仍能看到分段（好切回来）
-        let showASRProviderSeg = asrProviderNow == .bailian
+        // 上游 9-15 只留火山；本 fork 始终显示三段——「自定义」档正是本 fork 的核心能力
+        let showASRProviderSeg = true
 
         // 动态区：随服务商切换（火山→Key+版本三选；百炼→DashScope Key+模型说明）
         let keyContainer = NSStackView()
@@ -5503,6 +5553,16 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
         if let f = customModelField {
             config.save(value: f.stringValue.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "custom_polish_model")
         }
+        // 自定义识别档三件套：key 走钥匙串；Base URL / 模型是普通配置。字段为 nil（未选自定义档）时不动
+        if let f = customASRKeyField {
+            secretOK = config.saveSecret(f.stringValue.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "custom_asr_api_key") && secretOK
+        }
+        if let f = customASRBaseURLField {
+            config.save(value: f.stringValue.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "custom_asr_base_url")
+        }
+        if let f = customASRModelField {
+            config.save(value: f.stringValue.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "custom_asr_model")
+        }
         config.save(values: ["polish_provider": polishProviderControl.map { polishProvider(forSegment: $0.selectedSegment) } ?? "qwen"])
         if !secretOK {
             presentHistoryActionResult(success: false, message: "API Key 保存到钥匙串失败，请重试")
@@ -5587,7 +5647,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
         }
         let modelFields: [NSTextField?] = [bigASRAPIKeyField, bailianKeyField,
                                            dashscopeAPIKeyField, arkAPIKeyField,
-                                           customBaseURLField, customModelField, customAPIKeyField]
+                                           customBaseURLField, customModelField, customAPIKeyField,
+                                           customASRBaseURLField, customASRModelField, customASRKeyField]
         guard modelFields.contains(where: { $0 === field }) else { return }
         persistModelFields()
     }

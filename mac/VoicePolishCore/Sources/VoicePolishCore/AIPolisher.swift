@@ -432,28 +432,15 @@ public class AIPolisher {
 
     // MARK: - 自定义档（OpenAI 兼容端点）
 
-    /// Base URL 规整：去首尾空白与尾斜杠，只认 http/https（防手滑填出奇怪 scheme）。
-    /// 返回 nil = 无法构成可用地址，视为未配置。
-    static func normalizedCustomBase(_ base: String?) -> String? {
-        guard var trimmed = base?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else { return nil }
-        while trimmed.hasSuffix("/") { trimmed = String(trimmed.dropLast()) }
-        guard let url = URL(string: trimmed),
-              let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return nil }
-        return trimmed
-    }
-
     /// 按 OpenAI 生态习惯拼 chat/completions 端点：用户填 Base URL（可带 /v1、可带尾斜杠），
-    /// 这里补上 /chat/completions；已带完整路径则原样使用。
+    /// 这里补上 /chat/completions；已带完整路径则原样使用。规整规则见 CustomEndpoint。
     static func customChatCompletionsURL(from base: String?) -> URL? {
-        guard var trimmed = normalizedCustomBase(base) else { return nil }
-        if trimmed.hasSuffix("/chat/completions") { return URL(string: trimmed) }
-        trimmed += "/chat/completions"
-        return URL(string: trimmed)
+        CustomEndpoint.url(from: base, path: "/chat/completions")
     }
 
     /// 拼模型列表地址（GET {base}/models）。用户把完整 chat/completions 粘进 Base URL 时剥掉再拼。
     static func customModelsURL(from base: String) -> URL? {
-        guard var trimmed = normalizedCustomBase(base) else { return nil }
+        guard var trimmed = CustomEndpoint.normalizedBase(base) else { return nil }
         if trimmed.hasSuffix("/chat/completions") { trimmed = String(trimmed.dropLast("/chat/completions".count)) }
         return URL(string: trimmed + "/models")
     }

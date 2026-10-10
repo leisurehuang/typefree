@@ -84,6 +84,18 @@ final class SecretStoreRoutingTests: XCTestCase {
         XCTAssertTrue(raw.contains("api.deepseek.com"))                    // 非 secret 保留
     }
 
+    /// custom_asr_api_key（自定义识别档）同样走钥匙串路由。
+    func testCustomASRAPIKeyRoutesToKeychain() throws {
+        let secrets = InMemorySecretStore()
+        let (cfg, dir) = tmpConfig(secrets, seed: #"{"custom_asr_api_key":"sk-ASR-PLAIN","custom_asr_base_url":"https://api.siliconflow.cn/v1","custom_asr_model":"SenseVoice-Small"}"#)
+        XCTAssertEqual(cfg.string(forKey: "custom_asr_api_key"), "sk-ASR-PLAIN")
+        cfg.reconcileSecrets()
+        XCTAssertEqual(secrets.get("custom_asr_api_key"), "sk-ASR-PLAIN")
+        let raw = configRaw(dir)
+        XCTAssertFalse(raw.contains("sk-ASR-PLAIN"))
+        XCTAssertTrue(raw.contains("SenseVoice-Small"))
+    }
+
     // MARK: - reconcileSecrets
 
     func testReconcileStripsPlaintextWhenKeychainEqualOrEmpty() throws {
